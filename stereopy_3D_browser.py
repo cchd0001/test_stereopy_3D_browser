@@ -14,9 +14,40 @@ class Stereo3DWebCache:
                  cluster_label:str = 'Annotation',
                  spatial_label:str = 'spatial_rigid',
                  geneset = None):
-        self.test = None
+        self._data = adata
+        self._annokey = cluster_label
+        self._spatkey = spatial_label
+        self.InitMeshes(meshes)
         
-        
+    def get_summary(self):
+        """
+        return the summary.json
+        """
+        return ""
+
+    def get_gene(self,genename):
+        """
+        return the Gene/xxxgene.json
+        """
+        return ""
+    
+    def get_genename(self):
+        """
+        return the gene.json
+        """
+        return ""
+    
+    def get_mesh(self,meshname):
+        """
+        return the meshes.json
+        """
+        return ""
+    
+    def get_anno(self,annoname):
+        """
+        return the Anno/xxxanno.json
+        """
+        return ""
     
 
 class StoppableHTTPServer(HTTPServer):
@@ -136,6 +167,7 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
                 self.ret_404()
 
 
+                
 def launch(datas,
            meshes:{},
            port:int = 7654,
@@ -165,6 +197,15 @@ def launch(datas,
                 adata = adata.concatenate(h5datas[i])
     else:
         adata = datas
+    #sanity check for parameters
+    if not (cluster_label in adata.obs.columns and spatial_label in adata.obsm):
+        print('invalid keyword provided, return without any data browsing server...')
+        return
+    for meshname in meshes:
+        meshfile = meshes[meshname]
+        if os.path.isfile(meshfile):
+            print(f'invalid obj :{meshfile}, return without any data browsing server...')
+            return
     #create core datacache
     datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,geneset)
     ServerInstance.data_hook = datacache
@@ -177,3 +218,4 @@ def launch(datas,
     print(f'Starting server on http://127.0.0.1:{port}')
     print(f'To ternimate this server, please click the close button.\n or visit http://127.0.0.1:{port}/endnow to end this server.')
     httpd.serve_forever()
+    
