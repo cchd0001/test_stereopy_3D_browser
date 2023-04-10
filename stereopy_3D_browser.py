@@ -1,9 +1,94 @@
 import re,os,time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
 from typing import Optional, Union
 import anndata as ad
 from anndata import AnnData
+import numpy as np
+import pandas as pd
 
+class my_json_encoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.int64) or isinstance(obj, np.int32):
+            return int(obj)
+        if isinstance(obj, np.float64) or isinstance(obj, np.float32):
+            return float(obj)
+        return json.JSONEncoder.default(self, obj)
+
+class Meshes:
+    def __init__(self):
+        # meshname, vectors, faces
+        self._data = [[],[],[]]
+    @property
+    def data(self):
+        return self._data  
+    
+    def add_mesh(self, meshname, objfile):
+        cache = pd.read_csv(objfile, sep='\s+',header=None, compression='infer', comment='#')
+        cache.columns = ['type','v1','v2','v3']
+        vectors = cache[cache['type'] == 'v'].copy()
+        vectors = vectors[['v1','v2','v3']].copy()
+        vectors.columns = ['x','y','z']
+        vectors = vectors.astype(float)
+        xmin = vectors['x'].min();
+        xmax = vectors['x'].max();
+        ymin = vectors['y'].min();
+        ymax = vectors['y'].max();
+        zmin = vectors['z'].min();
+        zmax = vectors['z'].max();
+        if len(self._data[0])==0:
+            self.mesh_xmin = xmin
+            self.mesh_xmax = xmax
+            self.mesh_ymin = ymin
+            self.mesh_ymax = ymax
+            self.mesh_zmin = zmin
+            self.mesh_zmax = zmax
+        else:
+            if xmin < self.mesh_xmin :
+                self.mesh_xmin = xmin
+            if ymin < self.mesh_ymin :
+                self.mesh_ymin = ymin
+            if zmin < self.mesh_zmin :
+                self.mesh_zmin = zmin
+            if xmax > self.mesh_xmax :
+                self.mesh_xmax = xmax
+            if ymax > self.mesh_ymax :
+                self.mesh_ymax = ymax
+            if zmax > self.mesh_zmax :
+                self.mesh_zmax = zmax
+  
+        faces = cache[cache['type'] == 'f'].copy()
+        if faces.dtypes['v1'] == object:
+            faces['i'] = faces.apply(lambda row: int(row['v1'].split('/')[0])-1, axis=1)
+            faces['j'] = faces.apply(lambda row: int(row['v2'].split('/')[0])-1, axis=1)
+            faces['k'] = faces.apply(lambda row: int(row['v3'].split('/')[0])-1, axis=1)
+        else:
+            faces['i'] = faces['v1'] -1
+            faces['j'] = faces['v2'] -1 
+            faces['k'] = faces['v3'] -1
+        faces = faces[['i','j','k']].copy()
+  
+        self._data[0].append(meshname)
+        self._data[1].append(vectors.to_numpy().tolist())
+        self._data[2].append(faces.to_numpy().tolist())
+        
+    def update_summary(self,summary):
+        ret = summary
+        if self.mesh_xmin < ret['box']['xmin']:
+           ret['box']['xmin'] = self.mesh_xmin
+        if self.mesh_xmax > ret['box']['xmax']:
+           ret['box']['xmax'] = self.mesh_xmax
+        if self.mesh_ymin < ret['box']['ymin']:
+           ret['box']['ymin'] = self.mesh_ymin
+        if self.mesh_ymax > ret['box']['ymax']:
+           ret['box']['ymax'] = self.mesh_ymax
+        if self.mesh_zmin < ret['box']['zmin']:
+           ret['box']['zmin'] = self.mesh_zmin
+        if self.mesh_zmax > ret['box']['zmax']:
+           ret['box']['zmax'] = self.mesh_zmax
+        return ret      
+      
+        
 class Stereo3DWebCache:
     """
     Analyse the 3D SRT data and provide detailed json data for the data browser.
@@ -13,43 +98,115 @@ class Stereo3DWebCache:
                  meshes: {},
                  cluster_label:str = 'Annotation',
                  spatial_label:str = 'spatial_rigid',
-                 geneset = None):
+                 geneset = None,
+                 exp_cutoff = 0,
+                ):
         self._data = adata
         self._annokey = cluster_label
         self._spatkey = spatial_label
-        self.InitMeshes(meshes)
+        self._expcutoff = exp_cutoff
+        self._init_atlas_summary()
+        self._init_meshes(meshes)
+        self._update_atlas_summary()
         
+    def _init_atlas_summary(self):
+        """
+        get summary dic of atlas
+        """
+        self._summary = {}
+        # get the total xxx
+        self._summary['total_cell'] = len(self._data.obs)
+        self._summary['total_gene'] = len(self._data.var)
+        # get Annotation factors
+        self._summary['annokeys'] = []
+        self._summary['annomapper'] = {}
+        # get Annotation labels
+        unique_anno = np.unique(self._data.obs[self._annokey])
+        self._summary['annokeys'].append(self._annokey)
+        legend2int = {}
+        int2legend = {}
+        for i,key in enumerate(unique_anno):
+            legend2int[key]=i
+            int2legend[i]=key   
+        self._summary['annomapper'][f'{self._annokey}_legend2int'] = legend2int
+        self._summary['annomapper'][f'{self._annokey}_int2legend'] = int2legend
+        # prepare box-space
+        self._summary['box'] = {}
+        self._summary['box']['xmin'] = np.min(self._data.obsm[self._spatkey][:,0]) 
+        self._summary['box']['xmax'] = np.max(self._data.obsm[self._spatkey][:,0]) 
+        self._summary['box']['ymin'] = np.min(self._data.obsm[self._spatkey][:,1]) 
+        self._summary['box']['ymax'] = np.max(self._data.obsm[self._spatkey][:,1]) 
+        self._summary['box']['zmin'] = np.min(self._data.obsm[self._spatkey][:,2]) 
+        self._summary['box']['zmax'] = np.max(self._data.obsm[self._spatkey][:,2]) 
+    
+    def _init_meshes(self,meshes):
+        """
+        load all meshes
+        """
+        if len(meshes)>1:
+            self._has_mesh = True
+            self._meshes = Meshes()
+            for meshname in meshes:
+                self._meshes.add_mesh(meshname,meshes[meshname])
+        else:
+            self._has_mesh = False
+            
+    def _update_atlas_summary(self):
+        """
+        update summary in case mesh is much bigger than scatter matrix
+        """
+        if self._has_mesh:
+            self._summary = self._meshes.update_summary(self._summary)
+
     def get_summary(self):
         """
         return the summary.json
         """
-        return ""
+        return json.dumps(self._summary,cls=my_json_encoder)
 
+    def get_genenames(self):
+        """
+        return the gene.json
+        """
+        return json.dumps(self._data.var.index.tolist(),cls=my_json_encoder)
+
+    
     def get_gene(self,genename):
         """
         return the Gene/xxxgene.json
         """
-        return ""
+        xyz = self._data.obsm[self._spatkey]
+        df = pd.DataFrame(data=xyz,columns=['x','y','z'])
+        df = df.astype(int) # force convert to int to save space
+        genedata = self._data[:,genename]
+        if genedata.X is not np.ndarray:
+            df['exp'] = genedata.X.toarray()
+        else:
+            df['exp'] = genedata.X
+        df = df[df['exp']>self._expcutoff].copy()
+        return json.dumps(df.to_numpy().tolist(),cls=my_json_encoder)
     
-    def get_genename(self):
-        """
-        return the gene.json
-        """
-        return ""
-    
-    def get_mesh(self,meshname):
+    def get_meshes(self):
         """
         return the meshes.json
         """
-        return ""
+        if self._has_mesh:
+            return json.dumps(self._meshes.data,cls=my_json_encoder)
+        else:
+            return ''
     
-    def get_anno(self,annoname):
+    def get_anno(self):
         """
         return the Anno/xxxanno.json
         """
-        return ""
+        xyz = self._data.obsm[self._spatkey]
+        df = pd.DataFrame(data=xyz,columns=['x','y','z'])
+        df = df.astype(int) # force convert to int to save space
+        df['anno'] = self._data.obs[self._annokey].to_numpy()
+        mapper = self._summary['annomapper'][f'{self._annokey}_legend2int']
+        df['annoid'] = df.apply(lambda row : mapper[row['anno']],axis=1)
+        return json.dumps(df[['x','y','z','annoid']].to_numpy().tolist(),cls=my_json_encoder)
     
-
 class StoppableHTTPServer(HTTPServer):
     """
     The http server that stop when not_forever is called.
@@ -64,8 +221,11 @@ class StoppableHTTPServer(HTTPServer):
         print('Server terminate ...',flush=True)
         self.stopped = True
         self.server_close()
-        
+
 class ServerDataCache:
+    """
+    The template data cache.
+    """
     def __init__(self):
         self._data_hook = None
         self._server = None
@@ -93,14 +253,14 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
     The request hander that return static browser files or detailed data jsons.
     """
 
-    def stop_server(self):
+    def _stop_server(self):
         ServerInstance.server.not_forever()
         self.send_response(404)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
         self.wfile.write(b"Server shotdown now!")
         
-    def ret_static_files(self, the_relate_path, file_type):
+    def _ret_static_files(self, the_relate_path, file_type):
         """
         return all static files like the browser codes and images
         """
@@ -114,9 +274,16 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
             self.wfile.write(f.read())
             f.close()
         except:
-            self.ret_404()
-        
-    def ret_404(self):
+            self._ret_404()
+    
+    def _ret_jsonstr(self, jsonstr):
+        if len(jsonstr) > 1:
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()        
+            self.wfile.write(bytes(jsonstr,'UTF-8'))
+
+    def _ret_404(self):
         """
         return 404
         """
@@ -126,54 +293,53 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
         self.wfile.write(b"404 Not Found")
     
     def do_GET(self):
-        print(f'{self.path}',flush=True)
-        #if len(self.path.split('?')) > 1:
-        #    self.args = self.path.split('?')[1]
+        #print(f'{self.path}',flush=True)
         self.path = self.path.split('?')[0]
-        # set index.html as root by default
         if self.path in ['','//','/','/index.html']:
-            self.ret_static_files("/index.html", 'text/html')  
+            self._ret_static_files("/index.html", 'text/html')  
         elif self.path == '/endnow':
-            self.stop_server()
+            self._stop_server()
+        elif self.path == '/summary.json':
+            self._ret_jsonstr(ServerInstance.data_hook.get_summary())
+        elif self.path == '/gene.json':
+            self._ret_jsonstr(ServerInstance.data_hook.get_genenames())
+        elif self.path == '/meshes.json':
+            self._ret_jsonstr(ServerInstance.data_hook.get_meshes())
         elif self.path == '/test.json':  #handle json requst in the root path
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            ret_json = '{"test01":1.1, "test02":[1.1,3,2]}'
-            self.wfile.write(bytes(ret_json,'UTF-8'))
+            self._ret_jsonstr('{"test01":1.1, "test02":[1.1,3,2]}')
+        elif self.path == '/conf.json':
+            self._ret_jsonstr('')
         else:
-            # extract xxx from api/xxx using regex
             match_html = re.search('(.*).html$', self.path)
             match_js = re.search('(.*).js$', self.path)
             match_ttf = re.search('(.*).ttf$', self.path)
-            match_API_json = re.search('/api/(.*).json', self.path)
+            match_API_gene = re.search('/Gene/(.*).json', self.path)
+            match_API_anno = re.search('/Anno/(.*).json', self.path)
+            match_API_scoexp = re.search('/gene_scoexp/(.*).json', self.path)
             if match_js:
-                self.ret_static_files(self.path , 'application/javascript')
+                self._ret_static_files(self.path , 'application/javascript')
             elif match_html:
-                self.ret_static_files(self.path , 'text/html')
+                self._ret_static_files(self.path , 'text/html')
             elif match_ttf:
-                self.ret_static_files(self.path ,'application/x-font-ttf')
-            elif match_API_json:
-                #print('----------')
-                xxx = match_API_json.group(1)
-                # call function ABC with xxx as parameter
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                ret_json = '{"test01":"{' +xxx+'}\", \"test02\":[1.1,3,2,444444]}'
-                self.wfile.write(bytes(ret_json,'UTF-8'))
-                #print('----------')
-            else: # may be this is an static local file ? let try it
-                self.ret_404()
+                self._ret_static_files(self.path ,'application/x-font-ttf')
+            elif match_API_gene:
+                genename = match_API_gene.group(1)
+                self._ret_jsonstr(ServerInstance.data_hook.get_gene(genename))
+            elif match_API_anno:
+                self._ret_jsonstr(ServerInstance.data_hook.get_anno())
+            elif match_API_scoexp:
+                self._ret_jsonstr('')
+            else: 
+                self._ret_404()
 
-
-                
 def launch(datas,
            meshes:{},
            port:int = 7654,
            cluster_label:str = 'Annotation',
            spatial_label:str = 'spatial_rigid',
-           geneset = None):
+           geneset = None,
+           exp_cutoff = 0,
+          ):
     """
     Launch a data browser server based on input data
     
@@ -183,7 +349,7 @@ def launch(datas,
     :param cluster_label: the keyword in obs for cluster/annotation info
     :param spatial_label: the keyword in obsm for 3D spatial coordinate
     :param geneset: the specific geneset to display, show all genes in var if geneset is None
-    
+    :param exp_cutoff: the expression threshold to filter un-expression cells.
     :return:
     """
     #merge anndata if necessary
@@ -203,11 +369,14 @@ def launch(datas,
         return
     for meshname in meshes:
         meshfile = meshes[meshname]
-        if os.path.isfile(meshfile):
+        if not os.path.isfile(meshfile):
             print(f'invalid obj :{meshfile}, return without any data browsing server...')
             return
+    #filter by geneset now
+    if geneset is not None:
+        adata = adata[:,geneset] # notice, invalid gene will case program raising exceptions
     #create core datacache
-    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,geneset)
+    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,geneset,exp_cutoff)
     ServerInstance.data_hook = datacache
     
     #create webserver
@@ -216,6 +385,6 @@ def launch(datas,
     ServerInstance.server = httpd
     #start endless waiting now...
     print(f'Starting server on http://127.0.0.1:{port}')
-    print(f'To ternimate this server, please click the close button.\n or visit http://127.0.0.1:{port}/endnow to end this server.')
+    print(f'To ternimate this server , click: http://127.0.0.1:{port}/endnow')
     httpd.serve_forever()
     
