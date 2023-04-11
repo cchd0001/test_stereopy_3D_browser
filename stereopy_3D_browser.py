@@ -3,9 +3,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 from typing import Optional, Union
 import anndata as ad
-from anndata import AnnData
 import numpy as np
 import pandas as pd
+from io import StringIO
 
 class my_json_encoder(json.JSONEncoder):
     def default(self, obj):
@@ -22,9 +22,22 @@ class Meshes:
     @property
     def data(self):
         return self._data  
-    
+    @staticmethod
+    def MesheStr(objfile):
+        mesh_str = ''
+        file1 = open(objfile, 'r')
+        Lines = file1.readlines()
+        file1.close()
+        print(Lines)
+        for line in Lines:
+            if len(line)>1 and ( line[0] == 'v' or line[0] == 'f' ):
+                mesh_str = mesh_str + line
+        print(mesh_str)
+        return mesh_str
+        
     def add_mesh(self, meshname, objfile):
-        cache = pd.read_csv(objfile, sep='\s+',header=None, compression='infer', comment='#')
+        mesh_io = StringIO(Meshes.MesheStr(objfile))
+        cache = pd.read_csv(mesh_io, sep='\s+',header=None, compression='infer', comment='#')
         cache.columns = ['type','v1','v2','v3']
         vectors = cache[cache['type'] == 'v'].copy()
         vectors = vectors[['v1','v2','v3']].copy()
@@ -94,7 +107,7 @@ class Stereo3DWebCache:
     Analyse the 3D SRT data and provide detailed json data for the data browser.
     """
     def __init__(self,
-                 adata: AnnData,
+                 adata,
                  meshes: {},
                  cluster_label:str = 'Annotation',
                  spatial_label:str = 'spatial_rigid',
@@ -143,7 +156,7 @@ class Stereo3DWebCache:
         """
         load all meshes
         """
-        if len(meshes)>1:
+        if len(meshes)>0:
             self._has_mesh = True
             self._meshes = Meshes()
             for meshname in meshes:
@@ -360,7 +373,7 @@ def launch(datas,
         adata  = datas[0]
         if len(datas) > 1:
             for i in range (1,len(datas)):
-                adata = adata.concatenate(h5datas[i])
+                adata = adata.concatenate(datas[i])
     else:
         adata = datas
     #sanity check for parameters
