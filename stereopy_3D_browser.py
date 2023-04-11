@@ -277,7 +277,7 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
         """
         return all static files like the browser codes and images
         """
-        data_dir = "C:/Users/guolidong/Desktop/test"
+        data_dir = "D:/Github/test_stereopy_3D_browser/vt3d_browser"
         visit_path = f"{data_dir}{the_relate_path}"
         try:
             self.send_response(200)
