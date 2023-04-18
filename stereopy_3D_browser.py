@@ -28,11 +28,9 @@ class Meshes:
         file1 = open(objfile, 'r')
         Lines = file1.readlines()
         file1.close()
-        print(Lines)
         for line in Lines:
             if len(line)>1 and ( line[0] == 'v' or line[0] == 'f' ):
                 mesh_str = mesh_str + line
-        print(mesh_str)
         return mesh_str
         
     def add_mesh(self, meshname, objfile):
@@ -242,6 +240,7 @@ class ServerDataCache:
     def __init__(self):
         self._data_hook = None
         self._server = None
+        self._front_dir = None
     
     @property
     def data_hook(self):
@@ -257,7 +256,15 @@ class ServerDataCache:
     @data_hook.setter
     def data_hook(self, data_hook):
         self._data_hook = data_hook
+    
+    @property
+    def front_dir(self):
+        return self._front_dir
         
+    @front_dir.setter
+    def front_dir(self, dirname):
+        self._front_dir = dirname
+
 
 ServerInstance = ServerDataCache()
 
@@ -277,7 +284,7 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
         """
         return all static files like the browser codes and images
         """
-        data_dir = "D:/Github/test_stereopy_3D_browser/vt3d_browser"
+        data_dir = ServerInstance.front_dir 
         visit_path = f"{data_dir}{the_relate_path}"
         try:
             self.send_response(200)
@@ -306,7 +313,6 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
         self.wfile.write(b"404 Not Found")
     
     def do_GET(self):
-        #print(f'{self.path}',flush=True)
         self.path = self.path.split('?')[0]
         if self.path in ['','//','/','/index.html']:
             self._ret_static_files("/index.html", 'text/html')  
@@ -391,7 +397,8 @@ def launch(datas,
     #create core datacache
     datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,geneset,exp_cutoff)
     ServerInstance.data_hook = datacache
-    
+    ServerInstance.front_dir = os.path.dirname(os.path.abspath(__file__)) + '/vt3d_browser'
+    print(f'Current front-dir is {ServerInstance.front_dir}',flush=True)
     #create webserver
     server_address = ('', port)
     httpd = StoppableHTTPServer(server_address, DynamicRequstHander)
