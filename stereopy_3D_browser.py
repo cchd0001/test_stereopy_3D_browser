@@ -34,10 +34,10 @@ class Meshes:
         return mesh_str
 
     def add_mesh(self, meshname, objfile):
-        if isinstance(meshfile, str):
+        if isinstance(objfile, str):
             self._add_mesh_str(meshname, objfile)
-        elif isinstance(meshfile, dict):
-            self._add_mesh_str(meshname, objfile)
+        elif isinstance(objfile, dict):
+            self._add_mesh_dict(meshname, objfile)
         
     def _add_mesh_dict(self, meshname, dict_info):
         vectors = pd.DataFrame()
@@ -72,12 +72,19 @@ class Meshes:
             if zmax > self.mesh_zmax :
                 self.mesh_zmax = zmax
 
-        self._data[0].append(meshname)
-        self._data[1].append(vectors.to_numpy().tolist())
+        
         faces = []
         for four_points in dict_info['faces']:
-            faces.append([four_points[0], four_points[1],four_points[2]])
-            faces.append([four_points[0], four_points[2],four_points[3]])
+            if four_points[0] == 3 :
+                faces.append([four_points[1], four_points[2],four_points[3]])
+            elif four_points[0] == 4 :
+                faces.append([four_points[1], four_points[2],four_points[3]])
+                faces.append([four_points[1], four_points[3],four_points[4]])
+            else:
+                print('Error: not triangle or quadrilateral mesh')
+                return 
+        self._data[0].append(meshname)
+        self._data[1].append(vectors.to_numpy().tolist())
         self._data[2].append(faces)
 
     def _add_mesh_str(self, meshname, objfile):
