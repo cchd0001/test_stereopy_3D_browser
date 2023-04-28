@@ -32,8 +32,55 @@ class Meshes:
             if len(line)>1 and ( line[0] == 'v' or line[0] == 'f' ):
                 mesh_str = mesh_str + line
         return mesh_str
-        
+
     def add_mesh(self, meshname, objfile):
+        if isinstance(meshfile, str):
+            self._add_mesh_str(meshname, objfile)
+        elif isinstance(meshfile, dict):
+            self._add_mesh_str(meshname, objfile)
+        
+    def _add_mesh_dict(self, meshname, dict_info):
+        vectors = pd.DataFrame()
+        vectors['x'] = dict_info['points'][:,0]
+        vectors['y'] = dict_info['points'][:,1]
+        vectors['z'] = dict_info['points'][:,2]
+        vectors = vectors.astype(float)
+        xmin = vectors['x'].min();
+        xmax = vectors['x'].max();
+        ymin = vectors['y'].min();
+        ymax = vectors['y'].max();
+        zmin = vectors['z'].min();
+        zmax = vectors['z'].max();
+        if len(self._data[0])==0:
+            self.mesh_xmin = xmin
+            self.mesh_xmax = xmax
+            self.mesh_ymin = ymin
+            self.mesh_ymax = ymax
+            self.mesh_zmin = zmin
+            self.mesh_zmax = zmax
+        else:
+            if xmin < self.mesh_xmin :
+                self.mesh_xmin = xmin
+            if ymin < self.mesh_ymin :
+                self.mesh_ymin = ymin
+            if zmin < self.mesh_zmin :
+                self.mesh_zmin = zmin
+            if xmax > self.mesh_xmax :
+                self.mesh_xmax = xmax
+            if ymax > self.mesh_ymax :
+                self.mesh_ymax = ymax
+            if zmax > self.mesh_zmax :
+                self.mesh_zmax = zmax
+
+        self._data[0].append(meshname)
+        self._data[1].append(vectors.to_numpy().tolist())
+        faces = []
+        for four_points in dict_info['faces']:
+            faces.append([four_points[0], four_points[1],four_points[2]])
+            faces.append([four_points[0], four_points[2],four_points[3]])
+        self._data[2].append(faces)
+
+    def _add_mesh_str(self, meshname, objfile):
         mesh_io = StringIO(Meshes.MesheStr(objfile))
         cache = pd.read_csv(mesh_io, sep='\s+',header=None, compression='infer', comment='#')
         cache.columns = ['type','v1','v2','v3']
@@ -67,7 +114,9 @@ class Meshes:
                 self.mesh_ymax = ymax
             if zmax > self.mesh_zmax :
                 self.mesh_zmax = zmax
-  
+        self._data[0].append(meshname)
+        self._data[1].append(vectors.to_numpy().tolist())
+
         faces = cache[cache['type'] == 'f'].copy()
         if faces.dtypes['v1'] == object:
             faces['i'] = faces.apply(lambda row: int(row['v1'].split('/')[0])-1, axis=1)
@@ -78,11 +127,8 @@ class Meshes:
             faces['j'] = faces['v2'] -1 
             faces['k'] = faces['v3'] -1
         faces = faces[['i','j','k']].copy()
-  
-        self._data[0].append(meshname)
-        self._data[1].append(vectors.to_numpy().tolist())
         self._data[2].append(faces.to_numpy().tolist())
-        
+
     def update_summary(self,summary):
         ret = summary
         if self.mesh_xmin < ret['box']['xmin']:
@@ -97,9 +143,9 @@ class Meshes:
            ret['box']['zmin'] = self.mesh_zmin
         if self.mesh_zmax > ret['box']['zmax']:
            ret['box']['zmax'] = self.mesh_zmax
-        return ret      
-      
-        
+        return ret
+
+
 class Stereo3DWebCache:
     """
     Analyse the 3D SRT data and provide detailed json data for the data browser.
@@ -119,7 +165,7 @@ class Stereo3DWebCache:
         self._init_atlas_summary()
         self._init_meshes(meshes)
         self._update_atlas_summary()
-        
+
     def _init_atlas_summary(self):
         """
         get summary dic of atlas
@@ -161,7 +207,7 @@ class Stereo3DWebCache:
                 self._meshes.add_mesh(meshname,meshes[meshname])
         else:
             self._has_mesh = False
-            
+
     def _update_atlas_summary(self):
         """
         update summary in case mesh is much bigger than scatter matrix
@@ -181,7 +227,7 @@ class Stereo3DWebCache:
         """
         return json.dumps(self._data.var.index.tolist(),cls=my_json_encoder)
 
-    
+
     def get_gene(self,genename):
         """
         return the Gene/xxxgene.json
@@ -196,7 +242,7 @@ class Stereo3DWebCache:
             df['exp'] = genedata.X
         df = df[df['exp']>self._expcutoff].copy()
         return json.dumps(df.to_numpy().tolist(),cls=my_json_encoder)
-    
+
     def get_meshes(self):
         """
         return the meshes.json
@@ -205,7 +251,7 @@ class Stereo3DWebCache:
             return json.dumps(self._meshes.data,cls=my_json_encoder)
         else:
             return ''
-    
+
     def get_anno(self):
         """
         return the Anno/xxxanno.json
@@ -217,7 +263,7 @@ class Stereo3DWebCache:
         mapper = self._summary['annomapper'][f'{self._annokey}_legend2int']
         df['annoid'] = df.apply(lambda row : mapper[row['anno']],axis=1)
         return json.dumps(df[['x','y','z','annoid']].to_numpy().tolist(),cls=my_json_encoder)
-    
+
 class StoppableHTTPServer(HTTPServer):
     """
     The http server that stop when not_forever is called.
@@ -227,7 +273,7 @@ class StoppableHTTPServer(HTTPServer):
         while not self.stopped:
             self.handle_request()
             time.sleep(0.100)
-            
+
     def not_forever(self):
         print('Server terminate ...',flush=True)
         self.stopped = True
@@ -241,18 +287,18 @@ class ServerDataCache:
         self._data_hook = None
         self._server = None
         self._front_dir = None
-    
+
     @property
     def data_hook(self):
         return self._data_hook
     @property
     def server(self):
         return self._server
-    
+
     @server.setter
     def server(self,http):
         self._server = http
-    
+
     @data_hook.setter
     def data_hook(self, data_hook):
         self._data_hook = data_hook
@@ -388,9 +434,14 @@ def launch(datas,
         return
     for meshname in meshes:
         meshfile = meshes[meshname]
-        if not os.path.isfile(meshfile):
-            print(f'invalid obj :{meshfile}, return without any data browsing server...')
-            return
+        if isinstance(meshfile, str):
+            if not os.path.isfile(meshfile):
+                print(f'invalid obj :{meshfile}, return without any data browsing server...')
+                return
+        elif isinstance(meshfile, dict):
+            continue
+        else:
+            print(f'invalid mesh data :{meshfile}, return without any data browsing server...')
     #filter by geneset now
     if geneset is not None:
         adata = adata[:,geneset] # notice, invalid gene will case program raising exceptions
