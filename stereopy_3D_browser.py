@@ -201,13 +201,13 @@ class Stereo3DWebCache:
     def __init__(self,
                  adata,
                  meshes: {},
-                 cluster_label:str = 'Annotation',
+                 cluster_label = [],
                  spatial_label:str = 'spatial_rigid',
                  geneset = None,
                  exp_cutoff = 0,
                 ):
         self._data = adata
-        self._annokey = cluster_label
+        self._annokeys = cluster_label
         self._spatkey = spatial_label
         self._expcutoff = exp_cutoff
         self._init_atlas_summary()
@@ -225,16 +225,17 @@ class Stereo3DWebCache:
         # get Annotation factors
         self._summary['annokeys'] = []
         self._summary['annomapper'] = {}
-        # get Annotation labels
-        unique_anno = np.unique(self._data.obs[self._annokey])
-        self._summary['annokeys'].append(self._annokey)
-        legend2int = {}
-        int2legend = {}
-        for i,key in enumerate(unique_anno):
-            legend2int[key]=i
-            int2legend[i]=key   
-        self._summary['annomapper'][f'{self._annokey}_legend2int'] = legend2int
-        self._summary['annomapper'][f'{self._annokey}_int2legend'] = int2legend
+        for annkey in self._annokeys:
+            # get Annotation labels
+            unique_anno = np.unique(self._data.obs[annkey])
+            self._summary['annokeys'].append(annkey)
+            legend2int = {}
+            int2legend = {}
+            for i,key in enumerate(unique_anno):
+                legend2int[key]=i
+                int2legend[i]=key   
+            self._summary['annomapper'][f'{annkey}_legend2int'] = legend2int
+            self._summary['annomapper'][f'{annkey}_int2legend'] = int2legend
         # prepare box-space
         self._summary['box'] = {}
         self._summary['box']['xmin'] = np.min(self._data.obsm[self._spatkey][:,0]) 
@@ -304,23 +305,23 @@ class Stereo3DWebCache:
         """
         return the paga_line.json
         """
-        return json.dumps(getPAGALines(self._data,ty_col=self._annokey))
+        return json.dumps(getPAGALines(self._data,ty_col=self._annokey[0]))
         
     def get_paga(self):
         """
         return the paga.json
         """
-        return json.dumps(getPAGACurves(self._data,ty_col=self._annokey))
+        return json.dumps(getPAGACurves(self._data,ty_col=self._annokey[0]))
         
-    def get_anno(self):
+    def get_anno(self,annoname):
         """
         return the Anno/xxxanno.json
         """
         xyz = self._data.obsm[self._spatkey]
         df = pd.DataFrame(data=xyz,columns=['x','y','z'])
         df = df.astype(int) # force convert to int to save space
-        df['anno'] = self._data.obs[self._annokey].to_numpy()
-        mapper = self._summary['annomapper'][f'{self._annokey}_legend2int']
+        df['anno'] = self._data.obs[annoname].to_numpy()
+        mapper = self._summary['annomapper'][f'{annoname}_legend2int']
         df['annoid'] = df.apply(lambda row : mapper[row['anno']],axis=1)
         return json.dumps(df[['x','y','z','annoid']].to_numpy().tolist(),cls=my_json_encoder)
 
@@ -455,7 +456,8 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
                 genename = match_API_gene.group(1)
                 self._ret_jsonstr(ServerInstance.data_hook.get_gene(genename))
             elif match_API_anno:
-                self._ret_jsonstr(ServerInstance.data_hook.get_anno())
+                annoname = match_API_anno.group(1)
+                self._ret_jsonstr(ServerInstance.data_hook.get_anno(annoname))
             elif match_API_scoexp:
                 self._ret_jsonstr('')
             else: 
@@ -464,7 +466,7 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
 def launch(datas,
            meshes:{},
            port:int = 7654,
-           cluster_label:str = 'Annotation',
+           cluster_label = [],
            spatial_label:str = 'spatial_rigid',
            geneset = None,
            exp_cutoff = 0,
@@ -493,9 +495,13 @@ def launch(datas,
     else:
         adata = datas
     #sanity check for parameters
-    if not (cluster_label in adata.obs.columns and spatial_label in adata.obsm):
+    if (not spatial_label in adata.obsm) or len(cluster_label) <1 :
         print('invalid keyword provided, return without any data browsing server...')
         return
+    for annokey in cluster_label:
+        if annokey not in adata.obs.columns:
+            print('invalid keyword provided, return without any data browsing server...')
+            return
     for meshname in meshes:
         meshfile = meshes[meshname]
         if isinstance(meshfile, str):
