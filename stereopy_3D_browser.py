@@ -283,7 +283,7 @@ class Stereo3DWebCache:
         """
         xyz = self._data.obsm[self._spatkey]
         df = pd.DataFrame(data=xyz,columns=['x','y','z'])
-        df = df.astype(int) # force convert to int to save space
+        #df = df.astype(int) # force convert to int to save space
         genedata = self._data[:,genename]
         if genedata.X is not np.ndarray:
             df['exp'] = genedata.X.toarray()
@@ -319,7 +319,7 @@ class Stereo3DWebCache:
         """
         xyz = self._data.obsm[self._spatkey]
         df = pd.DataFrame(data=xyz,columns=['x','y','z'])
-        df = df.astype(int) # force convert to int to save space
+        #df = df.astype(int) # force convert to int to save space
         df['anno'] = self._data.obs[annoname].to_numpy()
         mapper = self._summary['annomapper'][f'{annoname}_legend2int']
         df['annoid'] = df.apply(lambda row : mapper[row['anno']],axis=1)
