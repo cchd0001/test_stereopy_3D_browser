@@ -8,6 +8,7 @@ import pandas as pd
 from io import StringIO
 from IPython.display import IFrame
 import _thread
+from time import sleep
 
 class my_json_encoder(json.JSONEncoder):
     def default(self, obj):
