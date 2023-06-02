@@ -468,7 +468,6 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
 
 def server_task(httpd,port):
     #start endless waiting now...
-    print(f'Starting server on http://127.0.0.1:{port}')
     print(f'To ternimate this server , click: http://127.0.0.1:{port}/endnow')
     httpd.serve_forever()
 
@@ -535,5 +534,5 @@ def launch(datas,
     ServerInstance.server = httpd
     _thread.start_new_thread(server_task,(httpd,port))
     sleep(1)
-    IFrame(src=f'http://127.0.0.1:{port}/',width=1200, height=900)
+    return IFrame(src=f'http://127.0.0.1:{port}/',width=1200, height=900)
     
