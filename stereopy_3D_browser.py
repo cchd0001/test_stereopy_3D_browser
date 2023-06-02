@@ -6,6 +6,8 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 from io import StringIO
+from IPython.display import IFrame
+import _thread
 
 class my_json_encoder(json.JSONEncoder):
     def default(self, obj):
@@ -463,6 +465,12 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
             else: 
                 self._ret_404()
 
+def server_task(httpd,port):
+    #start endless waiting now...
+    print(f'Starting server on http://127.0.0.1:{port}')
+    print(f'To ternimate this server , click: http://127.0.0.1:{port}/endnow')
+    httpd.serve_forever()
+
 def launch(datas,
            meshes:{},
            port:int = 7654,
@@ -524,8 +532,7 @@ def launch(datas,
     server_address = ('', port)
     httpd = StoppableHTTPServer(server_address, DynamicRequstHander)
     ServerInstance.server = httpd
-    #start endless waiting now...
-    print(f'Starting server on http://127.0.0.1:{port}')
-    print(f'To ternimate this server , click: http://127.0.0.1:{port}/endnow')
-    httpd.serve_forever()
+    _thread.start_new_thread(server_task,(httpd,port))
+    sleep(1)
+    IFrame(src=f'http://127.0.0.1:{port}/',width=1200, height=900)
     
