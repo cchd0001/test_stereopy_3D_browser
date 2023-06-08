@@ -18,7 +18,7 @@ class my_json_encoder(json.JSONEncoder):
             return float(obj)
         return json.JSONEncoder.default(self, obj)
 
-def getPAGACurves(adata,ty_col='annotation', choose_ty=None, trim=True):
+def getPAGACurves(adata,ty_col='annotation', choose_ty=None, trim=True,spatial_key='spatial_grid'):
     from PAGA_traj import cal_plt_param_traj_clus_from_adata
     x_unknown_li_all_tra, y_unknown_li_all_tra, z_unknown_li_all_tra, com_tra_li, com_tra_wei_li = \
         cal_plt_param_traj_clus_from_adata(adata,ty_col=ty_col,choose_ty=choose_ty,trim=trim,type_traj='curve')
@@ -203,7 +203,7 @@ class Stereo3DWebCache:
     """
     def __init__(self,
                  adata,
-                 meshes: {},
+                 meshes = {},
                  cluster_label = [],
                  spatial_label:str = 'spatial_rigid',
                  geneset = None,
@@ -247,6 +247,25 @@ class Stereo3DWebCache:
         self._summary['box']['ymax'] = np.max(self._data.obsm[self._spatkey][:,1]) 
         self._summary['box']['zmin'] = np.min(self._data.obsm[self._spatkey][:,2]) 
         self._summary['box']['zmax'] = np.max(self._data.obsm[self._spatkey][:,2]) 
+
+        self._summary['option'] = {
+            'default'           :   'CellTypes',
+            "CellTypes"         :   True,
+            "GeneExpression"    :   True,
+            "Digital_in_situ"   :   True,
+            'PAGA_trajectory'   :   False,
+            'GRN_Regulons'      :   False,
+            'Hotspot_Modules'   :   False,
+            'Cell_Cell_Communication'   : False,
+        }
+        if 'paga' in self._data.uns:
+            self._summary['option']['PAGA_trajectory'] = True
+        if 'ccc_data' in self._data.uns:
+            self._summary['option']['Cell_Cell_Communication'] = True
+        if 'grn' in  self._data.uns:
+            self._summary['option']['GRN_Regulons'] = True
+        if 'hotspot' in  self._data.uns:
+            self._summary['option']['Hotspot_Modules'] = True
     
     def _init_meshes(self,meshes):
         """
@@ -273,12 +292,30 @@ class Stereo3DWebCache:
         """
         return json.dumps(self._summary,cls=my_json_encoder)
 
+    def get_regulonnames(self): 
+        """
+        return the regulon.json
+        """
+        return json.dumps(list(self._data.uns['grn']['auc_mtx'].columns),cls=my_json_encoder)
+
+    def get_regulon(self,regulonname):
+        """
+        return the regulon.json
+        """
+        from scipy import stats
+        auc_mtx = self._data.uns['grn']['auc_mtx']
+        subdata = self._data[auc_mtx.index]
+        xyz = subdata.obsm[self._spatkey]
+        sub_zscore = auc_mtx[regulonname]
+        df = pd.DataFrame(data=xyz,columns=['x','y','z'])
+        df['zscore'] = stats.zscore(sub_zscore.to_numpy())
+        return json.dumps(df.to_numpy().tolist(),cls=my_json_encoder)
+
     def get_genenames(self):
         """
         return the gene.json
         """
         return json.dumps(self._data.var.index.tolist(),cls=my_json_encoder)
-
 
     def get_gene(self,genename):
         """
@@ -314,7 +351,7 @@ class Stereo3DWebCache:
         """
         return the paga.json
         """
-        return json.dumps(getPAGACurves(self._data,ty_col=self._annokey[0]))
+        return json.dumps(getPAGACurves(self._data,ty_col=self._annokey[0],spatial_key=self._spatkey))
         
     def get_anno(self,annoname):
         """
@@ -432,6 +469,8 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
             self._ret_jsonstr(ServerInstance.data_hook.get_summary())
         elif self.path == '/gene.json':
             self._ret_jsonstr(ServerInstance.data_hook.get_genenames())
+        elif self.path == '/regulon.json':
+            self._ret_jsonstr(ServerInstance.data_hook.get_regulonnames())
         elif self.path == '/meshes.json':
             self._ret_jsonstr(ServerInstance.data_hook.get_meshes())
         elif self.path == '/paga.json':
@@ -446,6 +485,7 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
             match_html = re.search('(.*).html$', self.path)
             match_js = re.search('(.*).js$', self.path)
             match_ttf = re.search('(.*).ttf$', self.path)
+            match_API_regulon = re.search('/Regulon/(.*).json', self.path)
             match_API_gene = re.search('/Gene/(.*).json', self.path)
             match_API_anno = re.search('/Anno/(.*).json', self.path)
             match_API_scoexp = re.search('/gene_scoexp/(.*).json', self.path)
@@ -455,6 +495,9 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
                 self._ret_static_files(self.path , 'text/html')
             elif match_ttf:
                 self._ret_static_files(self.path ,'application/x-font-ttf')
+            elif match_API_regulon:
+                regulon = match_API_regulon.group(1)
+                self._ret_jsonstr(ServerInstance.data_hook.get_regulon(regulon))
             elif match_API_gene:
                 genename = match_API_gene.group(1)
                 self._ret_jsonstr(ServerInstance.data_hook.get_gene(genename))
@@ -472,12 +515,14 @@ def server_task(httpd,port):
     httpd.serve_forever()
 
 def launch(datas,
-           meshes:{},
+           meshes={},
            port:int = 7654,
            cluster_label = [],
            spatial_label:str = 'spatial_rigid',
            geneset = None,
            exp_cutoff = 0,
+           width=1600, 
+           height=1000
           ):
     """
     Launch a data browser server based on input data
@@ -489,6 +534,8 @@ def launch(datas,
     :param spatial_label: the keyword in obsm for 3D spatial coordinate
     :param geneset: the specific geneset to display, show all genes in var if geneset is None
     :param exp_cutoff: the expression threshold to filter un-expression cells.
+    :param width: the window width to render
+    :param height: the window height to render
     :return:
     """
     #merge anndata if necessary
@@ -534,5 +581,5 @@ def launch(datas,
     ServerInstance.server = httpd
     _thread.start_new_thread(server_task,(httpd,port))
     sleep(1)
-    return IFrame(src=f'http://127.0.0.1:{port}/',width=1200, height=900)
+    return IFrame(src=f'http://127.0.0.1:{port}/',width=width, height=height)
     
