@@ -1,15 +1,28 @@
-import re,os,time
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import json
-from typing import Optional, Union
-import anndata as ad
+import re,os,time,_thread,math,json
 import numpy as np
 import pandas as pd
 from io import StringIO
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from IPython.display import IFrame
-import _thread
 from time import sleep
+from scipy import stats
+from PAGA_traj import cal_plt_param_traj_clus_from_adata
+#import anndata as ad
 
+def updateItem(item):
+    if isinstance(item,str):
+        return re.sub("[^a-zA-Z0-9-]",'_',item)
+    if isinstance(item,int) or isinstance(item,float) or isinstance(item, np.int64) or isinstance(item, np.int32) or isinstance(item, np.float32) or isinstance(item, np.float64):
+        if math.isnan(item):
+            return 'NA'
+        else:
+            return f'{int(item)}'
+
+def UpdateList(xxxarr):
+    tmp = pd.DataFrame()
+    tmp['v1'] = list(xxxarr)
+    tmp['v2'] = tmp.apply(lambda row: updateItem(row['v1']), axis=1)
+    return tmp['v2'].to_list()
 class my_json_encoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.int64) or isinstance(obj, np.int32):
@@ -19,7 +32,6 @@ class my_json_encoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 def getPAGACurves(adata,ty_col='annotation', choose_ty=None, trim=True,spatial_key='spatial_grid'):
-    from PAGA_traj import cal_plt_param_traj_clus_from_adata
     x_unknown_li_all_tra, y_unknown_li_all_tra, z_unknown_li_all_tra, com_tra_li, com_tra_wei_li = \
         cal_plt_param_traj_clus_from_adata(adata,ty_col=ty_col,choose_ty=choose_ty,trim=trim,type_traj='curve')
     traj_all = []
@@ -42,7 +54,6 @@ def getPAGACurves(adata,ty_col='annotation', choose_ty=None, trim=True,spatial_k
     return [traj_names,traj_lines,traj_widths]
 
 def getPAGALines(adata,ty_col='annotation',choose_ty=None, trim=True):
-    from PAGA_traj import cal_plt_param_traj_clus_from_adata
     x_unknown_li_all_tra, y_unknown_li_all_tra, z_unknown_li_all_tra, com_tra_li, com_tra_wei_li =\
         cal_plt_param_traj_clus_from_adata(adata,ty_col=ty_col,choose_ty=choose_ty,trim=trim,type_traj='line')
     traj_all = []
@@ -206,7 +217,6 @@ class Stereo3DWebCache:
                  meshes = {},
                  cluster_label = [],
                  spatial_label:str = 'spatial_rigid',
-                 geneset = None,
                  exp_cutoff = 0,
                 ):
         self._data = adata
@@ -262,8 +272,13 @@ class Stereo3DWebCache:
             self._summary['option']['PAGA_trajectory'] = True
         if 'ccc_data' in self._data.uns:
             self._summary['option']['Cell_Cell_Communication'] = True
+            self._data.uns['ccc_data']['data']['celltype1'] =UpdateList(self._data.uns['ccc_data']['data']['celltype1']) 
+            self._data.uns['ccc_data']['data']['celltype2'] =UpdateList(self._data.uns['ccc_data']['data']['celltype2']) 
+            self._data.uns['ccc_data']['data']['ligand'] =UpdateList(self._data.uns['ccc_data']['data']['ligand'])
+            self._data.uns['ccc_data']['data']['receptor'] =UpdateList(self._data.uns['ccc_data']['data']['receptor'])
         if 'grn' in  self._data.uns:
             self._summary['option']['GRN_Regulons'] = True
+            self._data.uns['grn']['auc_mtx'].columns = UpdateList(self._data.uns['grn']['auc_mtx'].columns)
         if 'hotspot' in  self._data.uns:
             self._summary['option']['Hotspot_Modules'] = True
     
@@ -302,7 +317,6 @@ class Stereo3DWebCache:
         """
         return the regulon.json
         """
-        from scipy import stats
         auc_mtx = self._data.uns['grn']['auc_mtx']
         subdata = self._data[auc_mtx.index]
         xyz = subdata.obsm[self._spatkey]
@@ -311,6 +325,46 @@ class Stereo3DWebCache:
         df['zscore'] = stats.zscore(sub_zscore.to_numpy())
         return json.dumps(df.to_numpy().tolist(),cls=my_json_encoder)
 
+    def get_ccc_dict(self):
+        """
+        return the ccc_dict.json
+        """
+        ccc_df = self._data.uns['ccc_data']['data']
+        senders = ccc_df['celltype1'].unique()
+        ret_dict = {}
+        for sender in senders:
+            ret_dict[sender] = {}
+            subdf = ccc_df[ccc_df['celltype1']==sender]
+            recivers = subdf['celltype2'].unique()
+            for reciver in recivers:
+                ret_dict[sender][reciver] = {}
+                subsubdf = subdf[subdf['celltype2']==reciver]
+                ligands = subsubdf['ligand'].unique()
+                for ligand in ligands:
+                    ret_dict[sender][reciver][ligand] = []
+                    subsubsubdf = subsubdf[subsubdf['ligand'] == ligand]
+                    receptors = subsubsubdf['receptor'].unique()
+                    for receptor in receptors:
+                        ret_dict[sender][reciver][ligand].append(receptor)
+        return json.dumps(ret_dict,cls=my_json_encoder)
+
+    def get_ccc_ct_gene(self,celltype,genename):
+        adata =  self._data
+        annokey = self._data.uns['ccc_data']['celltype_key']
+        if self._data.uns['ccc_data']['genename_key'] is None:
+            sub_adata = adata[adata.obs[annokey] == celltype, adata.var.index.str.lower() == genename.lower()]
+        else:
+            genename_key = self._data.uns['ccc_data']['genename_key']
+            sub_adata = adata[adata.obs[annokey] == celltype, adata.var[genename_key].str.lower() == genename.lower()]
+        xyz = sub_adata.obsm[self._spatkey]
+        df = pd.DataFrame(data=xyz,columns=['x','y','z'])
+        if sub_adata.X is not np.ndarray:
+            df['exp'] = sub_adata.X.toarray()
+        else:
+            df['exp'] = sub_adata.X
+        df = df[df['exp']>self._expcutoff].copy()
+        return json.dumps(df.to_numpy().tolist(),cls=my_json_encoder)
+    
     def get_genenames(self):
         """
         return the gene.json
@@ -471,6 +525,8 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
             self._ret_jsonstr(ServerInstance.data_hook.get_genenames())
         elif self.path == '/regulon.json':
             self._ret_jsonstr(ServerInstance.data_hook.get_regulonnames())
+        elif self.path == '/ccc_dict.json':
+            self._ret_jsonstr(ServerInstance.data_hook.get_ccc_dict())
         elif self.path == '/meshes.json':
             self._ret_jsonstr(ServerInstance.data_hook.get_meshes())
         elif self.path == '/paga.json':
@@ -488,6 +544,7 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
             match_API_regulon = re.search('/Regulon/(.*).json', self.path)
             match_API_gene = re.search('/Gene/(.*).json', self.path)
             match_API_anno = re.search('/Anno/(.*).json', self.path)
+            match_API_CCC = re.search('/CCC/(.*)/(.*).json', self.path)
             match_API_scoexp = re.search('/gene_scoexp/(.*).json', self.path)
             if match_js:
                 self._ret_static_files(self.path , 'application/javascript')
@@ -504,25 +561,35 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
             elif match_API_anno:
                 annoname = match_API_anno.group(1)
                 self._ret_jsonstr(ServerInstance.data_hook.get_anno(annoname))
+            elif match_API_CCC:
+                celltype = match_API_CCC.group(1)
+                genename = match_API_CCC.group(2) 
+                self._ret_jsonstr(ServerInstance.data_hook.get_ccc_ct_gene(celltype,genename))
             elif match_API_scoexp:
                 self._ret_jsonstr('')
             else: 
                 self._ret_404()
 
-def server_task(httpd,port):
+
+def server_task(httpd,ip,port):
     #start endless waiting now...
-    print(f'To ternimate this server , click: http://127.0.0.1:{port}/endnow')
+    print('Server staring now ...')
+    print(f'Call endServer("{ip}",{port}) to end this server')
     httpd.serve_forever()
+
+def endServer(ip='127.0.0.1',port=7654):
+    return IFrame(src=f'http://{ip}:{port}/endnow',width=500, height=50)
 
 def launch(datas,
            meshes={},
-           port:int = 7654,
            cluster_label = [],
            spatial_label:str = 'spatial_rigid',
            geneset = None,
            exp_cutoff = 0,
            width=1600, 
-           height=1000
+           height=1000,
+           ip='127.0.0.1',
+           port=7654,
           ):
     """
     Launch a data browser server based on input data
@@ -557,6 +624,8 @@ def launch(datas,
         if annokey not in adata.obs.columns:
             print('invalid keyword provided, return without any data browsing server...')
             return
+        else:
+            adata.obs[annokey] = UpdateList(adata.obs[annokey].to_list())
     for meshname in meshes:
         meshfile = meshes[meshname]
         if isinstance(meshfile, str):
@@ -569,9 +638,10 @@ def launch(datas,
             print(f'invalid mesh data :{meshfile}, return without any data browsing server...')
     #filter by geneset now
     if geneset is not None:
-        adata = adata[:,geneset] # notice, invalid gene will case program raising exceptions
+        adata = adata[:,geneset].copy() # notice, invalid gene will case program raising exceptions
+    adata.var_names = UpdateList(adata.var_names)
     #create core datacache
-    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,geneset,exp_cutoff)
+    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,exp_cutoff)
     ServerInstance.data_hook = datacache
     ServerInstance.front_dir = os.path.dirname(os.path.abspath(__file__)) + '/vt3d_browser'
     print(f'Current front-dir is {ServerInstance.front_dir}',flush=True)
@@ -579,7 +649,6 @@ def launch(datas,
     server_address = ('', port)
     httpd = StoppableHTTPServer(server_address, DynamicRequstHander)
     ServerInstance.server = httpd
-    _thread.start_new_thread(server_task,(httpd,port))
-    sleep(1)
+    _thread.start_new_thread(server_task,(httpd,ip,port))
+    sleep(2)
     return IFrame(src=f'http://127.0.0.1:{port}/',width=width, height=height)
-    
