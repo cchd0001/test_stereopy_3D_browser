@@ -442,7 +442,7 @@ def cal_plt_param_traj_clus_from_arr(con, x_raw, y_raw, z_raw, ty,
 # In[7]:
 
 
-def cal_plt_param_traj_clus_from_adata(adata, ty_col, choose_ty=None, trim=True,type_traj='curve',spatial_key='spatial_elas'):
+def cal_plt_param_traj_clus_from_adata(adata, ty_col, choose_ty=None, trim=True,type_traj='curve',spatial_key='spatial_elas',paga_key='paga'):
     """
     to calculate plotting parameters from adata
 
@@ -457,8 +457,8 @@ def cal_plt_param_traj_clus_from_adata(adata, ty_col, choose_ty=None, trim=True,
     y_raw = adata.obsm[spatial_key][:, 1]
     z_raw = adata.obsm[spatial_key][:, 2]
     ty = adata.obs[ty_col].to_numpy()
-    con = adata.uns['paga']['connectivities'].todense()  # arr (n_clus, n_clus)
-    con_tree = adata.uns['paga']['connectivities_tree'].todense()
+    con = adata.uns[paga_key]['connectivities'].todense()  # arr (n_clus, n_clus)
+    con_tree = adata.uns[paga_key]['connectivities_tree'].todense()
     if trim:
         con_plt = con_tree
     else:

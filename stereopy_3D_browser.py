@@ -31,9 +31,9 @@ class my_json_encoder(json.JSONEncoder):
             return float(obj)
         return json.JSONEncoder.default(self, obj)
 
-def getPAGACurves(adata,ty_col='annotation', choose_ty=None, trim=True,spatial_key='spatial_grid'):
+def getPAGACurves(adata,ty_col='annotation', choose_ty=None, trim=True,spatial_key='spatial_grid',paga_key='paga'):
     x_unknown_li_all_tra, y_unknown_li_all_tra, z_unknown_li_all_tra, com_tra_li, com_tra_wei_li = \
-        cal_plt_param_traj_clus_from_adata(adata,ty_col=ty_col,choose_ty=choose_ty,trim=trim,type_traj='curve')
+        cal_plt_param_traj_clus_from_adata(adata,ty_col=ty_col,choose_ty=choose_ty,trim=trim,type_traj='curve',paga_key=paga_key)
     traj_all = []
     traj_names = []
     traj_lines = []
@@ -53,9 +53,9 @@ def getPAGACurves(adata,ty_col='annotation', choose_ty=None, trim=True,spatial_k
             traj_widths.append(traj_W)
     return [traj_names,traj_lines,traj_widths]
 
-def getPAGALines(adata,ty_col='annotation',choose_ty=None, trim=True):
+def getPAGALines(adata,ty_col='annotation',choose_ty=None, trim=True,paga_key='paga'):
     x_unknown_li_all_tra, y_unknown_li_all_tra, z_unknown_li_all_tra, com_tra_li, com_tra_wei_li =\
-        cal_plt_param_traj_clus_from_adata(adata,ty_col=ty_col,choose_ty=choose_ty,trim=trim,type_traj='line')
+        cal_plt_param_traj_clus_from_adata(adata,ty_col=ty_col,choose_ty=choose_ty,trim=trim,type_traj='line',paga_key=paga_key)
     traj_all = []
     traj_names = []
     traj_lines = []
@@ -218,10 +218,16 @@ class Stereo3DWebCache:
                  cluster_label = [],
                  spatial_label:str = 'spatial_rigid',
                  exp_cutoff = 0,
+                 paga_key='paga',
+                 grn_key='grn',
+                 ccc_key='ccc_data'
                 ):
         self._data = adata
         self._annokeys = cluster_label
         self._spatkey = spatial_label
+        self._grn_key = grn_key
+        self._paga_key = paga_key
+        self._ccc_key = ccc_key
         self._expcutoff = exp_cutoff
         self._init_atlas_summary()
         self._init_meshes(meshes)
@@ -268,19 +274,18 @@ class Stereo3DWebCache:
             'Hotspot_Modules'   :   False,
             'Cell_Cell_Communication'   : False,
         }
-        if 'paga' in self._data.uns:
+        if  (self._paga_key is not None) and (self._paga_key in self._data.uns):
             self._summary['option']['PAGA_trajectory'] = True
-        if 'ccc_data' in self._data.uns:
+        if (self._ccc_key is not None) and (self._ccc_key in self._data.uns):
             self._summary['option']['Cell_Cell_Communication'] = True
-            self._data.uns['ccc_data']['data']['celltype1'] =UpdateList(self._data.uns['ccc_data']['data']['celltype1']) 
-            self._data.uns['ccc_data']['data']['celltype2'] =UpdateList(self._data.uns['ccc_data']['data']['celltype2']) 
-            self._data.uns['ccc_data']['data']['ligand'] =UpdateList(self._data.uns['ccc_data']['data']['ligand'])
-            self._data.uns['ccc_data']['data']['receptor'] =UpdateList(self._data.uns['ccc_data']['data']['receptor'])
-        if 'grn' in  self._data.uns:
+            self._data.uns[self._ccc_key]['data']['celltype1'] =UpdateList(self._data.uns[self._ccc_key]['data']['celltype1']) 
+            self._data.uns[self._ccc_key]['data']['celltype2'] =UpdateList(self._data.uns[self._ccc_key]['data']['celltype2']) 
+            self._data.uns[self._ccc_key]['data']['ligand'] =UpdateList(self._data.uns[self._ccc_key]['data']['ligand'])
+            self._data.uns[self._ccc_key]['data']['receptor'] =UpdateList(self._data.uns[self._ccc_key]['data']['receptor'])
+        if (self._grn_key is not None) and (self._grn_key in  self._data.uns):
             self._summary['option']['GRN_Regulons'] = True
-            self._data.uns['grn']['auc_mtx'].columns = UpdateList(self._data.uns['grn']['auc_mtx'].columns)
-        if 'hotspot' in  self._data.uns:
-            self._summary['option']['Hotspot_Modules'] = True
+            self._data.uns[self._grn_key]['auc_mtx'].columns = UpdateList(self._data.uns[self._grn_key]['auc_mtx'].columns)
+
     
     def _init_meshes(self,meshes):
         """
@@ -311,13 +316,13 @@ class Stereo3DWebCache:
         """
         return the regulon.json
         """
-        return json.dumps(list(self._data.uns['grn']['auc_mtx'].columns),cls=my_json_encoder)
+        return json.dumps(list(self._data.uns[self._grn_key]['auc_mtx'].columns),cls=my_json_encoder)
 
     def get_regulon(self,regulonname):
         """
         return the regulon.json
         """
-        auc_mtx = self._data.uns['grn']['auc_mtx']
+        auc_mtx = self._data.uns[self._grn_key]['auc_mtx']
         subdata = self._data[auc_mtx.index]
         xyz = subdata.obsm[self._spatkey]
         sub_zscore = auc_mtx[regulonname]
@@ -329,7 +334,7 @@ class Stereo3DWebCache:
         """
         return the ccc_dict.json
         """
-        ccc_df = self._data.uns['ccc_data']['data']
+        ccc_df = self._data.uns[self._ccc_key]['data']
         senders = ccc_df['celltype1'].unique()
         ret_dict = {}
         for sender in senders:
@@ -350,11 +355,11 @@ class Stereo3DWebCache:
 
     def get_ccc_ct_gene(self,celltype,genename):
         adata =  self._data
-        annokey = self._data.uns['ccc_data']['celltype_key']
-        if self._data.uns['ccc_data']['genename_key'] is None:
+        annokey = self._data.uns[self._ccc_key]['celltype_key']
+        if self._data.uns[self._ccc_key]['genename_key'] is None:
             sub_adata = adata[adata.obs[annokey] == celltype, adata.var.index.str.lower() == genename.lower()]
         else:
-            genename_key = self._data.uns['ccc_data']['genename_key']
+            genename_key = self._data.uns[self._ccc_key]['genename_key']
             sub_adata = adata[adata.obs[annokey] == celltype, adata.var[genename_key].str.lower() == genename.lower()]
         xyz = sub_adata.obsm[self._spatkey]
         df = pd.DataFrame(data=xyz,columns=['x','y','z'])
@@ -399,13 +404,13 @@ class Stereo3DWebCache:
         """
         return the paga_line.json
         """
-        return json.dumps(getPAGALines(self._data,ty_col=self._annokey[0]))
+        return json.dumps(getPAGALines(self._data,ty_col=self._annokey[0],paga_key=self._paga_key))
         
     def get_paga(self):
         """
         return the paga.json
         """
-        return json.dumps(getPAGACurves(self._data,ty_col=self._annokey[0],spatial_key=self._spatkey))
+        return json.dumps(getPAGACurves(self._data,ty_col=self._annokey[0],spatial_key=self._spatkey,paga_key=self._paga_key))
         
     def get_anno(self,annoname):
         """
@@ -581,9 +586,12 @@ def endServer(ip='127.0.0.1',port=7654):
     return IFrame(src=f'http://{ip}:{port}/endnow',width=500, height=50)
 
 def launch(datas,
-           meshes={},
            cluster_label = [],
            spatial_label:str = 'spatial_rigid',
+           meshes={},
+           paga_key: str = 'paga',
+           grn_key: str = 'grn',
+           ccc_key: str = 'ccc_data',
            geneset = None,
            exp_cutoff = 0,
            width=1600, 
@@ -595,14 +603,18 @@ def launch(datas,
     Launch a data browser server based on input data
     
     :param datas: an AnnData object or a list of AnnData objects
-    :param mesh: all meshes in dict like : {'heart': 'pathxxx/heart.obj', liver:'pathxxx/liver.obj'}
-    :parma port: the port id
     :param cluster_label: the keyword in obs for cluster/annotation info
     :param spatial_label: the keyword in obsm for 3D spatial coordinate
+    :param mesh: all meshes in dict like, support obj or polydata (in numpy format) : {'heart': 'pathxxx/heart.obj', liver: adata.uns['mesh']['liver']}
+    :param paga_key: paga data key in uns. if paga_key=None, or paga_key not exist in uns, the paga page will be disabled.
+    :param grn_key: grn data key in uns. if grn_key=None, or grn_key not exist in uns, the grn page will be disabled.
+    :param ccc_key: ccc data key in uns. if ccc_key=None, or ccc_key not exist in uns, the ccc page will be disabled.
     :param geneset: the specific geneset to display, show all genes in var if geneset is None
     :param exp_cutoff: the expression threshold to filter un-expression cells.
     :param width: the window width to render
     :param height: the window height to render
+    :parma port: the port id
+
     :return:
     """
     #merge anndata if necessary
@@ -641,7 +653,7 @@ def launch(datas,
         adata = adata[:,geneset].copy() # notice, invalid gene will case program raising exceptions
     adata.var_names = UpdateList(adata.var_names)
     #create core datacache
-    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,exp_cutoff)
+    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,exp_cutoff,paga_key,grn_key,ccc_key)
     ServerInstance.data_hook = datacache
     ServerInstance.front_dir = os.path.dirname(os.path.abspath(__file__)) + '/vt3d_browser'
     print(f'Current front-dir is {ServerInstance.front_dir}',flush=True)
