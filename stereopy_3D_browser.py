@@ -356,7 +356,7 @@ class Stereo3DWebCache:
     def get_ccc_ct_gene(self,celltype,genename):
         adata =  self._data
         annokey = self._data.uns[self._ccc_key]['celltype_key']
-        if self._data.uns[self._ccc_key]['genename_key'] is None:
+        if 'genename_key' not in self._data.uns or self._data.uns[self._ccc_key]['genename_key'] is None:
             sub_adata = adata[adata.obs[annokey] == celltype, adata.var.index.str.lower() == genename.lower()]
         else:
             genename_key = self._data.uns[self._ccc_key]['genename_key']
@@ -404,13 +404,13 @@ class Stereo3DWebCache:
         """
         return the paga_line.json
         """
-        return json.dumps(getPAGALines(self._data,ty_col=self._annokey[0],paga_key=self._paga_key))
+        return json.dumps(getPAGALines(self._data,ty_col=self._annokeys[0],paga_key=self._paga_key))
         
     def get_paga(self):
         """
         return the paga.json
         """
-        return json.dumps(getPAGACurves(self._data,ty_col=self._annokey[0],spatial_key=self._spatkey,paga_key=self._paga_key))
+        return json.dumps(getPAGACurves(self._data,ty_col=self._annokeys[0],spatial_key=self._spatkey,paga_key=self._paga_key))
         
     def get_anno(self,annoname):
         """
