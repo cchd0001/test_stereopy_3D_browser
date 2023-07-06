@@ -220,7 +220,8 @@ class Stereo3DWebCache:
                  exp_cutoff = 0,
                  paga_key='paga',
                  grn_key='grn',
-                 ccc_key='ccc_data'
+                 ccc_key='ccc_data',
+                 default_mode="CellTypes",
                 ):
         self._data = adata
         self._annokeys = cluster_label
@@ -229,6 +230,7 @@ class Stereo3DWebCache:
         self._paga_key = paga_key
         self._ccc_key = ccc_key
         self._expcutoff = exp_cutoff
+        self._default = default_mode
         self._init_atlas_summary()
         self._init_meshes(meshes)
         self._update_atlas_summary()
@@ -265,7 +267,7 @@ class Stereo3DWebCache:
         self._summary['box']['zmax'] = np.max(self._data.obsm[self._spatkey][:,2]) 
 
         self._summary['option'] = {
-            'default'           :   'CellTypes',
+            'default'           :   self._default,
             "CellTypes"         :   True,
             "GeneExpression"    :   True,
             "Digital_in_situ"   :   True,
@@ -594,6 +596,7 @@ def launch(datas,
            ccc_key: str = 'ccc_data',
            geneset = None,
            exp_cutoff = 0,
+           default_mode = 'CellTypes',
            width=1600, 
            height=1000,
            ip='127.0.0.1',
@@ -610,6 +613,7 @@ def launch(datas,
     :param grn_key: grn data key in uns. if grn_key=None, or grn_key not exist in uns, the grn page will be disabled.
     :param ccc_key: ccc data key in uns. if ccc_key=None, or ccc_key not exist in uns, the ccc page will be disabled.
     :param geneset: the specific geneset to display, show all genes in var if geneset is None
+    :param default_mode: the default mode to display. 
     :param exp_cutoff: the expression threshold to filter un-expression cells.
     :param width: the window width to render
     :param height: the window height to render
@@ -653,7 +657,7 @@ def launch(datas,
         adata = adata[:,geneset].copy() # notice, invalid gene will case program raising exceptions
     adata.var_names = UpdateList(adata.var_names)
     #create core datacache
-    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,exp_cutoff,paga_key,grn_key,ccc_key)
+    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,exp_cutoff,paga_key,grn_key,ccc_key,default_mode)
     ServerInstance.data_hook = datacache
     ServerInstance.front_dir = os.path.dirname(os.path.abspath(__file__)) + '/vt3d_browser'
     print(f'Current front-dir is {ServerInstance.front_dir}',flush=True)
