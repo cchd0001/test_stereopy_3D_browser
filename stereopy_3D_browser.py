@@ -19,6 +19,7 @@ def updateItem(item):
             return f'{int(item)}'
 
 def UpdateList(xxxarr):
+    return xxxarr
     tmp = pd.DataFrame()
     tmp['v1'] = list(xxxarr)
     tmp['v2'] = tmp.apply(lambda row: updateItem(row['v1']), axis=1)
@@ -222,6 +223,7 @@ class Stereo3DWebCache:
                  grn_key='grn',
                  ccc_key='ccc_data',
                  default_mode="CellTypes",
+                 conf = {},
                 ):
         self._data = adata
         self._annokeys = cluster_label
@@ -234,6 +236,7 @@ class Stereo3DWebCache:
         self._init_atlas_summary()
         self._init_meshes(meshes)
         self._update_atlas_summary()
+        self._conf = conf
 
     def _init_atlas_summary(self):
         """
@@ -426,6 +429,19 @@ class Stereo3DWebCache:
         df['annoid'] = df.apply(lambda row : mapper[row['anno']],axis=1)
         return json.dumps(df[['x','y','z','annoid']].to_numpy().tolist(),cls=my_json_encoder)
 
+    def get_conf(self):
+        conf = {}
+        if  'ctm'  in self._conf:
+            ctlist = []
+            ctkey = self._summary["annokeys"][0]
+            for x in self._summary['annomapper'][f'{ctkey}_legend2int']:
+                if x in self._conf['ctm']:
+                    ctlist.append( self._conf['ctm'][x])
+                else:
+                    ctlist.append('grey')
+            conf['celltype_color'] = ctlist
+        return json.dumps(conf,cls=my_json_encoder)
+
 class StoppableHTTPServer(HTTPServer):
     """
     The http server that stop when not_forever is called.
@@ -543,7 +559,7 @@ class DynamicRequstHander(BaseHTTPRequestHandler):
         elif self.path == '/test.json':  #handle json requst in the root path
             self._ret_jsonstr('{"test01":1.1, "test02":[1.1,3,2]}')
         elif self.path == '/conf.json':
-            self._ret_jsonstr('')
+            self._ret_jsonstr(ServerInstance.data_hook.get_conf())
         else:
             match_html = re.search('(.*).html$', self.path)
             match_js = re.search('(.*).js$', self.path)
@@ -601,6 +617,7 @@ def launch(datas,
            height=1000,
            ip='127.0.0.1',
            port=7654,
+           conf={},
           ):
     """
     Launch a data browser server based on input data
@@ -657,7 +674,7 @@ def launch(datas,
         adata = adata[:,geneset].copy() # notice, invalid gene will case program raising exceptions
     adata.var_names = UpdateList(adata.var_names)
     #create core datacache
-    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,exp_cutoff,paga_key,grn_key,ccc_key,default_mode)
+    datacache = Stereo3DWebCache(adata,meshes,cluster_label,spatial_label,exp_cutoff,paga_key,grn_key,ccc_key,default_mode,conf)
     ServerInstance.data_hook = datacache
     ServerInstance.front_dir = os.path.dirname(os.path.abspath(__file__)) + '/vt3d_browser'
     print(f'Current front-dir is {ServerInstance.front_dir}',flush=True)
